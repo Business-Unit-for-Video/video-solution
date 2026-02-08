@@ -1,0 +1,31 @@
+# Core dependencies
+yt-dlp>=2024.1.0
+ffmpeg-python>=0.2.0
+
+# ASR and alignment
+whisperx>=3.1.0
+torch>=2.0.0
+torchaudio>=2.0.0
+faster-whisper>=0.10.0
+
+# LLM APIs
+openai>=1.0.0
+anthropic>=0.18.0
+
+# TTS and Voice Cloning
+TTS>=0.22.0  # Coqui TTS
+# For GPT-SoVITS: clone from https://github.com/RVC-Boss/GPT-SoVITS
+
+# Video processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Lip sync (optional)
+# For Wav2Lip: clone from https://github.com/Rudrabha/Wav2Lip
+
+# Utilities
+requests>=2.31.0
+pydub>=0.25.1
+tqdm>=4.66.0
+python-dotenv>=1.0.0

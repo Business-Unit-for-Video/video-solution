@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  video-processor:
+    build: .
+    image: video-solution:latest
+    container_name: video-processor
+    runtime: nvidia  # Requires nvidia-docker
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - DEVICE=cuda
+    volumes:
+      - ./output:/app/output
+      - ./cookies.txt:/app/cookies.txt:ro
+      - ./.env:/app/.env:ro
+    env_file:
+      - .env
+    command: >
+      python3 scripts/pipeline.py
+      --channel-url "${CHANNEL_URL}"
+      --cookies /app/cookies.txt
+      --limit 1

@@ -1,0 +1,511 @@
+name: 🎬 Video Processing Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_url:
+        description: 'YouTube Channel/Playlist URL'
+        required: true
+        type: string
+        default: 'https://www.youtube.com/@channel'
+      
+      video_limit:
+        description: 'Max videos to process (0 = all)'
+        required: false
+        type: number
+        default: 1
+      
+      target_language:
+        description: 'Target translation language'
+        required: true
+        type: choice
+        options:
+          - en
+          - zh
+          - ja
+          - ko
+          - es
+          - fr
+        default: 'en'
+      
+      skip_translation:
+        description: 'Skip translation and dubbing'
+        type: boolean
+        default: false
+      
+      skip_lip_sync:
+        description: 'Skip lip sync (faster)'
+        type: boolean
+        default: true
+      
+      whisper_model:
+        description: 'Whisper model size'
+        type: choice
+        options:
+          - tiny
+          - base
+          - small
+          - medium
+          - large-v2
+          - large-v3
+        default: 'large-v2'
+      
+      censor_mode:
+        description: 'Sensitive word handling'
+        type: choice
+        options:
+          - none
+          - mute
+          - beep
+        default: 'beep'
+      
+      runner_type:
+        description: 'Runner type (use self-hosted for GPU)'
+        type: choice
+        options:
+          - ubuntu-latest
+          - self-hosted
+        default: 'self-hosted'
+
+  # 定时任务：每天凌晨 2 点运行
+  schedule:
+    - cron: '0 2 * * *'
+
+env:
+  PYTHON_VERSION: '3.10'
+  CACHE_VERSION: v1
+
+jobs:
+  # ============================================================
+  # Job 1: 获取视频列表
+  # ============================================================
+  fetch-videos:
+    name: 📥 Fetch Video List
+    runs-on: ${{ github.event.inputs.runner_type || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    
+    outputs:
+      video_count: ${{ steps.fetch.outputs.video_count }}
+      manifest_path: ${{ steps.fetch.outputs.manifest_path }}
+    
+    steps:
+      - name: 📂 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: 📦 Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install yt-dlp requests
+      
+      - name: 🍪 Setup cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            echo "⚠️  Warning: YOUTUBE_COOKIES secret not set"
+            echo "Some videos may be unavailable without authentication"
+          else
+            echo "$YOUTUBE_COOKIES" > cookies.txt
+          fi
+      
+      - name: 📡 Fetch video list
+        id: fetch
+        run: |
+          python -m src.video_solution.cli fetch-list \
+            --channel-url "${{ github.event.inputs.channel_url }}" \
+            --cookies cookies.txt \
+            --out output/list.json \
+            --format json
+          
+          # 统计视频数量
+          VIDEO_COUNT=$(python -c "import json; print(len(json.load(open('output/list.json'))))")
+          echo "video_count=$VIDEO_COUNT" >> $GITHUB_OUTPUT
+          echo "manifest_path=output/list.json" >> $GITHUB_OUTPUT
+          echo "✓ Fetched $VIDEO_COUNT videos"
+      
+      - name: 📤 Upload video list
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-list
+          path: output/list.json
+          retention-days: 30
+          compression-level: 9
+
+  # ============================================================
+  # Job 2: 下载音频（使用 matrix 并行下载）
+  # ============================================================
+  download-audio:
+    name: 🎵 Download Audio
+    needs: fetch-videos
+    runs-on: ${{ github.event.inputs.runner_type || 'ubuntu-latest' }}
+    timeout-minutes: 120
+    
+    strategy:
+      max-parallel: 3  # 最多 3 个并行任务
+      fail-fast: false
+      matrix:
+        # 动态生成批次（将在实际运行时处理）
+        batch: [1]
+    
+    steps:
+      - name: 📂 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: 📦 Install yt-dlp
+        run: pip install yt-dlp
+      
+      - name: 📥 Download video list
+        uses: actions/download-artifact@v4
+        with:
+          name: video-list
+          path: output/
+      
+      - name: 🍪 Setup cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: echo "$YOUTUBE_COOKIES" > cookies.txt
+      
+      - name: 🎵 Download audio files
+        run: |
+          python scripts/download_batch.py \
+            --manifest output/list.json \
+            --limit ${{ github.event.inputs.video_limit || 1 }} \
+            --cookies cookies.txt \
+            --out output/audio \
+            --format m4a
+      
+      - name: 📤 Upload audio files
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-files
+          path: output/audio/
+          retention-days: 7
+          compression-level: 6  # 音频已压缩，降低压缩级别
+
+  # ============================================================
+  # Job 3: ASR 转写（需要 GPU）
+  # ============================================================
+  transcribe:
+    name: 🎤 Transcribe Audio
+    needs: download-audio
+    runs-on: self-hosted  # ⚠️ 强制使用自托管 GPU runner
+    timeout-minutes: 180
+    
+    steps:
+      - name: 📂 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 🔍 Check CUDA availability
+        run: |
+          if command -v nvidia-smi &> /dev/null; then
+            echo "✓ CUDA available"
+            nvidia-smi
+          else
+            echo "⚠️  No CUDA detected, using CPU (will be slow)"
+          fi
+      
+      - name: 📦 Install dependencies (with cache)
+        run: |
+          pip install --upgrade pip
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+          pip install whisperx faster-whisper
+      
+      - name: 🗂️ Cache Whisper models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/whisper
+          key: ${{ runner.os }}-whisper-${{ github.event.inputs.whisper_model }}-${{ env.CACHE_VERSION }}
+          restore-keys: |
+            ${{ runner.os }}-whisper-${{ github.event.inputs.whisper_model }}-
+            ${{ runner.os }}-whisper-
+      
+      - name: 📥 Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: video-list
+          path: output/
+      
+      - name: 📥 Download audio
+        uses: actions/download-artifact@v4
+        with:
+          name: audio-files
+          path: output/audio/
+      
+      - name: 🎤 Run transcription
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python scripts/transcribe_batch.py \
+            --manifest output/list.json \
+            --audio-dir output/audio \
+            --out output/transcripts \
+            --model ${{ github.event.inputs.whisper_model || 'large-v2' }} \
+            --device cuda \
+            --hf-token "$HF_TOKEN" \
+            --limit ${{ github.event.inputs.video_limit || 1 }}
+      
+      - name: 📊 Transcription summary
+        run: |
+          echo "## Transcription Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          for file in output/transcripts/*.json; do
+            if [ -f "$file" ]; then
+              SEGMENTS=$(python -c "import json; print(len(json.load(open('$file'))))")
+              echo "- $(basename $file): $SEGMENTS segments" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+      
+      - name: 📤 Upload transcripts
+        uses: actions/upload-artifact@v4
+        with:
+          name: transcripts
+          path: output/transcripts/
+          retention-days: 30
+          compression-level: 9
+
+  # ============================================================
+  # Job 4: 生成章节
+  # ============================================================
+  generate-chapters:
+    name: 📑 Generate Chapters
+    needs: transcribe
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: 📂 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: 📦 Install dependencies
+        run: |
+          pip install openai anthropic
+      
+      - name: 📥 Download transcripts
+        uses: actions/download-artifact@v4
+        with:
+          name: transcripts
+          path: output/transcripts/
+      
+      - name: 📑 Generate chapters with LLM
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python scripts/generate_chapters.py \
+            --transcripts output/transcripts \
+            --out output/chapters \
+            --model gpt-4o-mini
+      
+      - name: 📤 Upload chapters
+        uses: actions/upload-artifact@v4
+        with:
+          name: chapters
+          path: output/chapters/
+          retention-days: 30
+
+  # ============================================================
+  # Job 5: 翻译和配音（可选）
+  # ============================================================
+  translate-dub:
+    name: 🌍 Translate & Dub
+    needs: generate-chapters
+    if: ${{ github.event.inputs.skip_translation != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: 📂 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: 📦 Install dependencies
+        run: |
+          pip install openai TTS
+      
+      - name: 📥 Download chapters
+        uses: actions/download-artifact@v4
+        with:
+          name: chapters
+          path: output/chapters/
+      
+      - name: 🌍 Translate with GPT-4
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python scripts/translate_batch.py \
+            --chapters output/chapters \
+            --target-lang ${{ github.event.inputs.target_language }} \
+            --out output/translations
+      
+      - name: 📤 Upload translations
+        uses: actions/upload-artifact@v4
+        with:
+          name: translations
+          path: output/translations/
+          retention-days: 30
+
+  # ============================================================
+  # Job 6: 敏感词过滤（可选）
+  # ============================================================
+  censor:
+    name: 🚫 Apply Censorship
+    needs: download-audio
+    if: ${{ github.event.inputs.censor_mode != 'none' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: 📂 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 🔧 Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      
+      - name: 📥 Download audio
+        uses: actions/download-artifact@v4
+        with:
+          name: audio-files
+          path: output/audio/
+      
+      - name: 📥 Download transcripts
+        uses: actions/download-artifact@v4
+        with:
+          name: transcripts
+          path: output/transcripts/
+      
+      - name: 📥 Download sensitive wordlist
+        run: |
+          mkdir -p data
+          wget -O data/sensitive_words.txt \
+            https://raw.githubusercontent.com/fwwdn/sensitive-stop-words/master/%E6%95%8F%E6%84%9F%E8%AF%8D%E5%BA%93.txt \
+            || echo "⚠️  Failed to download wordlist, using empty list"
+      
+      - name: 🚫 Apply censorship
+        run: |
+          python scripts/censor_batch.py \
+            --audio-dir output/audio \
+            --transcripts output/transcripts \
+            --wordlist data/sensitive_words.txt \
+            --mode ${{ github.event.inputs.censor_mode }} \
+            --out output/censored_audio
+      
+      - name: 📤 Upload censored audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: censored-audio
+          path: output/censored_audio/
+          retention-days: 7
+
+  # ============================================================
+  # Job 7: 生成最终报告
+  # ============================================================
+  generate-report:
+    name: 📊 Generate Report
+    needs: [fetch-videos, transcribe, generate-chapters]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - name: 📂 Checkout code
+        uses: actions/checkout@v4
+      
+      - name: 📥 Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      
+      - name: 📊 Generate summary report
+        run: |
+          python scripts/generate_report.py \
+            --artifacts-dir artifacts/ \
+            --out output/report.html
+      
+      - name: 📝 Write workflow summary
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          # 🎬 Video Processing Complete
+          
+          ## 📊 Statistics
+          - **Videos Processed**: ${{ needs.fetch-videos.outputs.video_count }}
+          - **Target Language**: ${{ github.event.inputs.target_language }}
+          - **Whisper Model**: ${{ github.event.inputs.whisper_model }}
+          - **Censor Mode**: ${{ github.event.inputs.censor_mode }}
+          
+          ## 📦 Artifacts
+          - Video List
+          - Audio Files
+          - Transcripts
+          - Chapters
+          ${skip_translation == 'false' && '- Translations' || ''}
+          ${censor_mode != 'none' && '- Censored Audio' || ''}
+          
+          ## 🔗 Download Results
+          Check the "Artifacts" section above to download processed files.
+          EOF
+      
+      - name: 📤 Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-report
+          path: output/report.html
+          retention-days: 90
+
+  # ============================================================
+  # Job 8: 通知（可选）
+  # ============================================================
+  notify:
+    name: 📢 Send Notification
+    needs: [generate-report]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📧 Send email notification
+        if: ${{ secrets.NOTIFICATION_EMAIL }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "🎬 Video Pipeline: ${{ job.status }}"
+          body: |
+            Workflow: ${{ github.workflow }}
+            Status: ${{ job.status }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: GitHub Actions
+
