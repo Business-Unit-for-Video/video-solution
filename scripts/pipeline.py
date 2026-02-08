@@ -92,14 +92,20 @@ def main():
         coarse_segments = initial_segments(segments, pause_threshold=2.0)
         
         if args.openai_key:
+            # 使用 OpenAI（如果提供了 key）
             chapters = generate_chapters_with_llm(
                 coarse_segments,
+                llm_provider="openai",
+                model="gpt-4o-mini",
                 api_key=args.openai_key
             )
         else:
-            chapters = coarse_segments
-            for i, ch in enumerate(chapters, 1):
-                ch["chapter_title"] = f"段落 {i}"
+            # 默认使用 Ollama（免费）
+            chapters = generate_chapters_with_llm(
+                coarse_segments,
+                llm_provider="ollama",
+                model="qwen2.5:14b"  # 或 qwen2.5:7b（更快）
+            )
         
         chapters_path = video_dir / "chapters.json"
         with open(chapters_path, "w", encoding="utf-8") as f:
@@ -108,13 +114,23 @@ def main():
         print(f"✓ Generated {len(chapters)} chapters")
         
         # Step 5: Translation (optional)
-        if not args.skip_translation and args.openai_key:
-            print(f"\nSTEP 5: Translating to {args.target_lang}...")
-            chapters = translate_with_timing(
-                chapters,
-                tgt_lang=args.target_lang,
-                api_key=args.openai_key
-            )
+        if not args.skip_translation:
+            if args.openai_key:
+                chapters = translate_with_timing(
+                    chapters,
+                    tgt_lang=args.target_lang,
+                    llm_provider="openai",
+                    model="gpt-4o-mini",
+                    api_key=args.openai_key
+                )
+            else:
+                # 使用 Ollama 翻译
+                chapters = translate_with_timing(
+                    chapters,
+                    tgt_lang=args.target_lang,
+                    llm_provider="ollama",
+                    model="qwen2.5:14b"
+                )
         
         # Save final result
         result_path = video_dir / "result.json"

@@ -1,0 +1,374 @@
+# .github/workflows/video-pipeline-hybrid.yml
+name: 🎬 Video Pipeline (Hybrid - No GPU Required)
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_url:
+        description: 'YouTube Channel/Playlist URL'
+        required: true
+      video_limit:
+        description: 'Max videos to process'
+        type: number
+        default: 1
+      target_language:
+        description: 'Target translation language'
+        type: choice
+        options: [en, zh, ja, ko, es]
+        default: 'en'
+      ollama_model:
+        description: 'Ollama model (smaller = faster on CPU)'
+        type: choice
+        options:
+          - qwen2.5:3b    # 最快（CPU 友好）
+          - qwen2.5:7b    # 平衡
+          - qwen2.5:14b   # 最好质量（慢）
+        default: 'qwen2.5:7b'
+
+env:
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  # ============================================================
+  # Job 1: 获取视频列表（GitHub Actions - CPU OK）
+  # ============================================================
+  fetch-videos:
+    name: 📥 Fetch Video List
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    outputs:
+      video_count: ${{ steps.fetch.outputs.video_count }}
+    
+    steps:
+      - name: 📂 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: 📦 Install dependencies
+        run: pip install yt-dlp
+      
+      - name: 🍪 Setup cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: echo "$YOUTUBE_COOKIES" > cookies.txt
+      
+      - name: 📡 Fetch video list
+        id: fetch
+        run: |
+          python -m src.video_solution.cli fetch-list \
+            --channel-url "${{ github.event.inputs.channel_url }}" \
+            --cookies cookies.txt \
+            --out output/list.json
+          
+          VIDEO_COUNT=$(python -c "import json; print(len(json.load(open('output/list.json'))))")
+          echo "video_count=$VIDEO_COUNT" >> $GITHUB_OUTPUT
+      
+      - name: 📤 Upload list
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-list
+          path: output/list.json
+
+  # ============================================================
+  # Job 2: 下载音频（GitHub Actions - CPU OK）
+  # ============================================================
+  download-audio:
+    name: 🎵 Download Audio
+    needs: fetch-videos
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - name: 📂 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install yt-dlp
+        run: pip install yt-dlp
+      
+      - name: 📥 Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: video-list
+          path: output/
+      
+      - name: 🍪 Setup cookies
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: echo "$YOUTUBE_COOKIES" > cookies.txt
+      
+      - name: 🎵 Download audio
+        run: |
+          python scripts/download_batch.py \
+            --manifest output/list.json \
+            --limit ${{ github.event.inputs.video_limit }} \
+            --cookies cookies.txt \
+            --out output/audio
+      
+      - name: 📤 Upload audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: audio-files
+          path: output/audio/
+          retention-days: 7
+
+  # ============================================================
+  # Job 3: 转写（Google Colab - 免费 GPU）⭐ 关键改动
+  # ============================================================
+  transcribe-colab:
+    name: 🎤 Transcribe (Google Colab GPU)
+    needs: download-audio
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: 📂 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 📥 Download audio
+        uses: actions/download-artifact@v4
+        with:
+          name: audio-files
+          path: output/audio/
+      
+      - name: 🚀 Trigger Google Colab transcription
+        env:
+          COLAB_WEBHOOK: ${{ secrets.COLAB_WEBHOOK }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # 上传音频到临时存储（GitHub Release 或 transfer.sh）
+          echo "📤 Uploading audio files..."
+          
+          # 方案 1: 使用 transfer.sh（免费，10GB，14天）
+          for audio_dir in output/audio/*/; do
+            video_id=$(basename "$audio_dir")
+            tar -czf "${video_id}.tar.gz" -C output/audio "$video_id"
+            
+            # 上传并获取下载链接
+            AUDIO_URL=$(curl --upload-file "${video_id}.tar.gz" https://transfer.sh/)
+            echo "Audio URL: $AUDIO_URL"
+            
+            # 触发 Colab notebook（通过 webhook 或 API）
+            # 这里需要你设置一个 Colab notebook 接收任务
+            echo "$AUDIO_URL" >> audio_urls.txt
+          done
+          
+          # 将 URL 列表保存为 artifact
+          echo "✓ Audio files uploaded, ready for Colab processing"
+      
+      - name: 📝 Create Colab instructions
+        run: |
+          cat > colab_instructions.md << 'EOF'
+          # Google Colab 转写步骤
+          
+          1. 打开这个 Colab notebook: https://colab.research.google.com/
+          2. 复制以下代码到 notebook:
+          
+          ```python
+          # 安装依赖
+          !pip install whisperx yt-dlp
+          
+          # 下载音频文件
+          import urllib.request
+          audio_urls = """
+          $(cat audio_urls.txt)
+          """
+          
+          for url in audio_urls.strip().split('\n'):
+              if url:
+                  !wget -O audio.tar.gz "$url"
+                  !tar -xzf audio.tar.gz
+          
+          # 运行转写
+          import whisperx
+          import json
+          import glob
+          
+          device = "cuda"
+          model = whisperx.load_model("large-v2", device)
+          
+          for audio_file in glob.glob("*/audio.*"):
+              print(f"Processing: {audio_file}")
+              audio = whisperx.load_audio(audio_file)
+              result = model.transcribe(audio, batch_size=16)
+              
+              # 保存结果
+              video_id = audio_file.split('/')
+              with open(f"{video_id}_transcript.json", "w") as f:
+                  json.dump(result["segments"], f, ensure_ascii=False)
+          
+          # 打包所有转写结果
+          !tar -czf transcripts.tar.gz *_transcript.json
+          
+          # 上传结果（需要你手动下载或上传到 GitHub）
+          from google.colab import files
+          files.download('transcripts.tar.gz')
+          ```
+          
+          3. 运行 notebook
+          4. 下载 transcripts.tar.gz
+          5. 在 GitHub Actions 中继续下一步
+          EOF
+          
+          cat colab_instructions.md
+      
+      - name: 📤 Upload instructions
+        uses: actions/upload-artifact@v4
+        with:
+          name: colab-instructions
+          path: |
+            audio_urls.txt
+            colab_instructions.md
+      
+      - name: ⏸️ Wait for manual transcription
+        run: |
+          echo "================================================"
+          echo "⚠️  Manual step required:"
+          echo "   1. Download 'colab-instructions' artifact"
+          echo "   2. Follow instructions in colab_instructions.md"
+          echo "   3. Upload transcripts.tar.gz to next workflow run"
+          echo "================================================"
+          
+          # 这里可以暂停 workflow，等待手动触发下一步
+          # 或者使用 workflow_dispatch 分成两个 workflow
+
+  # ============================================================
+  # Job 4: 章节生成（GitHub Actions CPU + Ollama）
+  # ============================================================
+  generate-chapters:
+    name: 📑 Generate Chapters (Ollama CPU)
+    needs: transcribe-colab
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+      - name: 📂 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          
+          # 后台启动 Ollama
+          ollama serve > /tmp/ollama.log 2>&1 &
+          sleep 5
+          
+          # 拉取轻量级模型（适合 CPU）
+          ollama pull ${{ github.event.inputs.ollama_model }}
+      
+      - name: 📥 Download transcripts
+        uses: actions/download-artifact@v4
+        with:
+          name: transcripts  # 假设你已经手动上传了
+          path: output/transcripts/
+      
+      - name: 📑 Generate chapters
+        run: |
+          pip install requests
+          
+          python scripts/generate_chapters.py \
+            --transcripts output/transcripts \
+            --out output/chapters \
+            --provider ollama \
+            --model ${{ github.event.inputs.ollama_model }}
+      
+      - name: 📊 Show results
+        run: |
+          echo "## Chapter Generation Results" >> $GITHUB_STEP_SUMMARY
+          for file in output/chapters/*.json; do
+            CHAPTERS=$(python -c "import json; print(len(json.load(open('$file'))))")
+            echo "- $(basename $file): $CHAPTERS chapters" >> $GITHUB_STEP_SUMMARY
+          done
+      
+      - name: 📤 Upload chapters
+        uses: actions/upload-artifact@v4
+        with:
+          name: chapters
+          path: output/chapters/
+
+  # ============================================================
+  # Job 5: 翻译（Ollama CPU - 可选）
+  # ============================================================
+  translate:
+    name: 🌍 Translate (Ollama CPU)
+    needs: generate-chapters
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    
+    steps:
+      - name: 📂 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: 📦 Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          sleep 5
+          ollama pull ${{ github.event.inputs.ollama_model }}
+      
+      - name: 📥 Download chapters
+        uses: actions/download-artifact@v4
+        with:
+          name: chapters
+          path: output/chapters/
+      
+      - name: 🌍 Translate
+        run: |
+          pip install requests
+          
+          python scripts/translate_batch.py \
+            --chapters output/chapters \
+            --target-lang ${{ github.event.inputs.target_language }} \
+            --provider ollama \
+            --model ${{ github.event.inputs.ollama_model }} \
+            --out output/translations
+      
+      - name: 📤 Upload translations
+        uses: actions/upload-artifact@v4
+        with:
+          name: translations
+          path: output/translations/
+
+  # ============================================================
+  # Job 6: 生成报告
+  # ============================================================
+  report:
+    name: 📊 Generate Report
+    needs: [generate-chapters, translate]
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      
+      - name: 📊 Summary
+        run: |
+          echo "# 🎬 Processing Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Videos processed" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Transcripts generated (via Colab)" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Chapters created (Ollama CPU)" >> $GITHUB_STEP_SUMMARY
+          echo "✓ Translations done (Ollama CPU)" >> $GITHUB_STEP_SUMMARY
