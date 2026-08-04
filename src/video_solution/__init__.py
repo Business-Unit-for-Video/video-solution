@@ -21,4 +21,5 @@ __all__ = [
     "censor",
     "translate_tts",
     "content_package",
+    "preview_renderer",
 ]

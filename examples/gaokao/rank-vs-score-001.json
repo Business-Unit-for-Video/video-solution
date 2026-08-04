@@ -8,6 +8,13 @@
     "internal_preview"
   ],
   "audience": "陕西 2027 届高三学生家长",
+  "presenter": {
+    "profile_id": "gaokao-mature-male-teacher-v1",
+    "persona": "成熟男性老师",
+    "avatar_origin": "original_synthetic_non_real_person",
+    "voice_strategy": "generic_synthetic_male_no_cloning",
+    "publication_rights_status": "pending"
+  },
   "title": "模考分数为什么不能直接等于高考位次",
   "hook": "同样的分数，在不同考试里可能代表完全不同的位置。",
   "script": "家长经常问，孩子这次模考多少分，能报什么大学？先不要直接套用往年的分数。不同考试的难度和参加范围可能不同，模考分数需要先结合校内或年级排名理解。正式高考成绩出来后，还要结合陕西当年一分一段表看省内位次，再核对当年招生计划和院校、专业录取数据。模考阶段可以做区间判断，但不能承诺最终录取。现在先准备历次模考分数与排名、选科、目标城市和专业、家庭约束四类资料。点击领取准备清单；具体位次预测和志愿方案请由咨询师复核。",
