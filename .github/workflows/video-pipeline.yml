@@ -491,10 +491,12 @@ jobs:
     needs: [generate-report]
     if: always()
     runs-on: ubuntu-latest
+    env:
+      NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
     
     steps:
       - name: 📧 Send email notification
-        if: ${{ secrets.NOTIFICATION_EMAIL }}
+        if: ${{ env.NOTIFICATION_EMAIL != '' }}
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -506,6 +508,6 @@ jobs:
             Workflow: ${{ github.workflow }}
             Status: ${{ job.status }}
             Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          to: ${{ env.NOTIFICATION_EMAIL }}
           from: GitHub Actions
 
