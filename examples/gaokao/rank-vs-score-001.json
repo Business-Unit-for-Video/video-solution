@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "campaign_id": "gaokao-2027-shaanxi-pilot",
+  "content_id": "rank-vs-score-001",
+  "content_type": "short_video",
+  "revision": 1,
+  "target_channels": [
+    "internal_preview"
+  ],
+  "audience": "陕西 2027 届高三学生家长",
+  "title": "模考分数为什么不能直接等于高考位次",
+  "hook": "同样的分数，在不同考试里可能代表完全不同的位置。",
+  "script": "家长经常问，孩子这次模考多少分，能报什么大学？先不要直接套用往年的分数。不同考试的难度和参加范围可能不同，模考分数需要先结合校内或年级排名理解。正式高考成绩出来后，还要结合陕西当年一分一段表看省内位次，再核对当年招生计划和院校、专业录取数据。模考阶段可以做区间判断，但不能承诺最终录取。现在先准备历次模考分数与排名、选科、目标城市和专业、家庭约束四类资料。点击领取准备清单；具体位次预测和志愿方案请由咨询师复核。",
+  "risk_disclosure": "阶段性判断仅供准备参考，正式志愿方案需结合当年省排名、招生计划和人工复核。",
+  "cta": {
+    "label": "领取高考准备清单",
+    "url": "https://example.invalid/gaokao?campaign_id=gaokao-2027-shaanxi-pilot&content_id=rank-vs-score-001"
+  },
+  "sources": [
+    {
+      "source_id": "gaokao-kb-rank",
+      "publisher": "Gaokao knowledge base",
+      "title": "位次",
+      "location": "repo://Business-Unit-for-Gaokao/gaokao-knowledge-base/01-核心概念/位次.md",
+      "version": "a4b39df",
+      "retrieved_at": "2026-08-04",
+      "applicability": "陕西/2027 届",
+      "review_status": "pending"
+    },
+    {
+      "source_id": "gaokao-kb-score-table",
+      "publisher": "Gaokao knowledge base",
+      "title": "一分一段表",
+      "location": "repo://Business-Unit-for-Gaokao/gaokao-knowledge-base/01-核心概念/一分一段表.md",
+      "version": "a4b39df",
+      "retrieved_at": "2026-08-04",
+      "applicability": "全国通用概念；陕西年度数据待补充",
+      "review_status": "pending"
+    },
+    {
+      "source_id": "gaokao-kb-preparation",
+      "publisher": "Gaokao knowledge base",
+      "title": "志愿填报准备工作",
+      "location": "repo://Business-Unit-for-Gaokao/gaokao-knowledge-base/03-志愿填报方法/志愿填报准备工作.md",
+      "version": "a4b39df",
+      "retrieved_at": "2026-08-04",
+      "applicability": "全国通用方法；年度政策和数据另行审核",
+      "review_status": "pending"
+    }
+  ],
+  "risk_level": "high",
+  "handoff_topics": [
+    "具体省位次预测",
+    "录取概率",
+    "最终志愿方案"
+  ],
+  "rights": [],
+  "status": "draft",
+  "review": {}
+}

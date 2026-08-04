@@ -20,4 +20,5 @@ __all__ = [
     "editor",
     "censor",
     "translate_tts",
+    "content_package",
 ]
