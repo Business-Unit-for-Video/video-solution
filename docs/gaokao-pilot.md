@@ -13,7 +13,7 @@ python -m src.video_solution.cli validate-content \
   --report output/gaokao/rank-vs-score-001.validation.json
 ```
 
-Production validation intentionally fails for the example because its source is pending, rights are empty, and the package is not approved:
+Production validation intentionally fails for the example because its source is pending and the package is not approved:
 
 ```bash
 python -m src.video_solution.cli validate-content \
@@ -43,6 +43,6 @@ python -m src.video_solution.cli render-preview \
   --output-dir output/gaokao/previews
 ```
 
-The initial preview provider uses a still portrait. Lip sync and managed avatar providers remain later adapters and must not weaken the same validation, approval, rights, watermark, or manifest controls.
+The initial preview provider uses a still portrait. Lip sync and managed avatar providers remain later adapters and must not weaken the same validation, approval, watermark, or manifest controls. Publication material and permission checks remain manual business-owner actions.
 
 Customer facts and scripts remain owned by the Gaokao business unit. Do not put student personal data or provider secrets in this repository.

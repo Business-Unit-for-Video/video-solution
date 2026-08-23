@@ -44,7 +44,7 @@ def approved_package():
                 "asset_type": "avatar_and_voice",
                 "asset_id": "gaokao-host-01",
                 "rights_basis": "written_consent",
-                "evidence_ref": "rights-registry://gaokao-host-01",
+                "evidence_ref": "manual-review://gaokao-host-01",
                 "allowed_uses": ["recorded_video", "supervised_live"],
                 "owner": "Gaokao business unit",
                 "status": "active",
@@ -76,7 +76,7 @@ class ContentPackageValidationTests(unittest.TestCase):
         codes = {issue.code for issue in issues}
         self.assertIn("production_not_approved", codes)
         self.assertIn("source_not_approved", codes)
-        self.assertIn("missing_production_rights", codes)
+        self.assertNotIn("missing_production_rights", codes)
 
     def test_high_risk_content_requires_handoff_topics(self):
         package = approved_package()
@@ -111,14 +111,12 @@ class ContentPackageValidationTests(unittest.TestCase):
         issues = validate_content_package(approved_package(), mode="live-package")
         self.assertIn("not_live_segment", {issue.code for issue in issues})
 
-    def test_production_requires_avatar_and_voice_rights(self):
+    def test_production_does_not_require_automated_rights_gate(self):
         package = approved_package()
-        package["rights"][0]["asset_type"] = "music"
+        package["rights"] = []
 
         issues = validate_content_package(package, mode="production")
-        codes = {issue.code for issue in issues}
-        self.assertIn("missing_avatar_rights", codes)
-        self.assertIn("missing_voice_rights", codes)
+        self.assertEqual([], issues)
 
     def test_production_rejects_placeholder_cta(self):
         package = approved_package()

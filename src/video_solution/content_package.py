@@ -328,6 +328,8 @@ def _validate_text_list(
 
 
 def _validate_rights(rights: Any, issues: list[ValidationIssue]) -> None:
+    if rights is None:
+        return
     if not isinstance(rights, list):
         issues.append(ValidationIssue("invalid_rights", "rights", "rights must be an array"))
         return
@@ -428,46 +430,6 @@ def _validate_production_readiness(
                         "Production requires every source to be approved",
                     )
                 )
-
-    rights = package.get("rights")
-    if not isinstance(rights, list) or not rights:
-        issues.append(
-            ValidationIssue(
-                "missing_production_rights",
-                "rights",
-                "Production requires at least one active rights record",
-            )
-        )
-    elif not any(isinstance(right, dict) and right.get("status") == "active" for right in rights):
-        issues.append(
-            ValidationIssue(
-                "no_active_rights",
-                "rights",
-                "Production requires at least one active rights record",
-            )
-        )
-    else:
-        active_types = {
-            right.get("asset_type")
-            for right in rights
-            if isinstance(right, dict) and right.get("status") == "active"
-        }
-        if not active_types.intersection({"avatar", "avatar_and_voice"}):
-            issues.append(
-                ValidationIssue(
-                    "missing_avatar_rights",
-                    "rights",
-                    "Production requires active avatar likeness rights",
-                )
-            )
-        if not active_types.intersection({"voice", "avatar_and_voice"}):
-            issues.append(
-                ValidationIssue(
-                    "missing_voice_rights",
-                    "rights",
-                    "Production requires active synthesized/cloned voice rights",
-                )
-            )
 
     cta = package.get("cta")
     if isinstance(cta, dict) and isinstance(cta.get("url"), str):
