@@ -108,20 +108,26 @@ jobs:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
           if [ -z "$YOUTUBE_COOKIES" ]; then
-            echo "⚠️  Warning: YOUTUBE_COOKIES secret not set"
+            rm -f cookies.txt
+            echo "⚠️  Warning: YOUTUBE_COOKIES secret not set; continuing without authentication"
             echo "Some videos may be unavailable without authentication"
           else
-            echo "$YOUTUBE_COOKIES" > cookies.txt
+            printf '%s' "$YOUTUBE_COOKIES" > cookies.txt
+            python scripts/validate_youtube_cookies.py cookies.txt
+            chmod 600 cookies.txt
           fi
       
       - name: 📡 Fetch video list
         id: fetch
         run: |
-          python -m src.video_solution.cli fetch-list \
+          CMD=(python -m src.video_solution.cli fetch-list \
             --channel-url "${{ github.event.inputs.channel_url }}" \
-            --cookies cookies.txt \
             --out output/list.json \
-            --format json
+            --format json)
+          if [ -s cookies.txt ]; then
+            CMD+=(--cookies cookies.txt)
+          fi
+          "${CMD[@]}"
           
           # 统计视频数量
           VIDEO_COUNT=$(python -c "import json; print(len(json.load(open('output/list.json'))))")
@@ -175,16 +181,27 @@ jobs:
       - name: 🍪 Setup cookies
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
-        run: echo "$YOUTUBE_COOKIES" > cookies.txt
+        run: |
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            rm -f cookies.txt
+            echo "No YOUTUBE_COOKIES secret; downloading without authentication"
+          else
+            printf '%s' "$YOUTUBE_COOKIES" > cookies.txt
+            python scripts/validate_youtube_cookies.py cookies.txt
+            chmod 600 cookies.txt
+          fi
       
       - name: 🎵 Download audio files
         run: |
-          python scripts/download_batch.py \
+          CMD=(python scripts/download_batch.py \
             --manifest output/list.json \
             --limit ${{ github.event.inputs.video_limit || 1 }} \
-            --cookies cookies.txt \
             --out output/audio \
-            --format m4a
+            --format m4a)
+          if [ -s cookies.txt ]; then
+            CMD+=(--cookies cookies.txt)
+          fi
+          "${CMD[@]}"
       
       - name: 📤 Upload audio files
         uses: actions/upload-artifact@v4

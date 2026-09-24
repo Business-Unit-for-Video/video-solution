@@ -52,7 +52,14 @@ jobs:
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          echo "$YOUTUBE_COOKIES" > cookies.txt
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            rm -f cookies.txt
+            echo "No YOUTUBE_COOKIES secret; continuing without authentication"
+          else
+            printf '%s' "$YOUTUBE_COOKIES" > cookies.txt
+            python scripts/validate_youtube_cookies.py cookies.txt
+            chmod 600 cookies.txt
+          fi
       
       - name: Setup API keys
         env:
@@ -64,19 +71,25 @@ jobs:
       
       - name: Step 1 - Fetch video list
         run: |
-          python -m src.video_solution.cli fetch-list \
+          CMD=(python -m src.video_solution.cli fetch-list \
             --channel-url "${{ inputs.channel_url }}" \
-            --cookies cookies.txt \
             --out output/list.json \
-            --format json
+            --format json)
+          if [ -s cookies.txt ]; then
+            CMD+=(--cookies cookies.txt)
+          fi
+          "${CMD[@]}"
       
       - name: Step 2 - Download audio
         run: |
-          python scripts/download_batch.py \
+          CMD=(python scripts/download_batch.py \
             --manifest output/list.json \
             --limit ${{ inputs.video_limit }} \
-            --cookies cookies.txt \
-            --out output/audio
+            --out output/audio)
+          if [ -s cookies.txt ]; then
+            CMD+=(--cookies cookies.txt)
+          fi
+          "${CMD[@]}"
       
       - name: Step 3 - Transcribe
         run: |

@@ -56,15 +56,26 @@ jobs:
       - name: 🍪 Setup cookies
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
-        run: echo "$YOUTUBE_COOKIES" > cookies.txt
+        run: |
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            rm -f cookies.txt
+            echo "No YOUTUBE_COOKIES secret; fetching without authentication"
+          else
+            printf '%s' "$YOUTUBE_COOKIES" > cookies.txt
+            python scripts/validate_youtube_cookies.py cookies.txt
+            chmod 600 cookies.txt
+          fi
       
       - name: 📡 Fetch video list
         id: fetch
         run: |
-          python -m src.video_solution.cli fetch-list \
+          CMD=(python -m src.video_solution.cli fetch-list \
             --channel-url "${{ github.event.inputs.channel_url }}" \
-            --cookies cookies.txt \
-            --out output/list.json
+            --out output/list.json)
+          if [ -s cookies.txt ]; then
+            CMD+=(--cookies cookies.txt)
+          fi
+          "${CMD[@]}"
           
           VIDEO_COUNT=$(python -c "import json; print(len(json.load(open('output/list.json'))))")
           echo "video_count=$VIDEO_COUNT" >> $GITHUB_OUTPUT
@@ -105,15 +116,26 @@ jobs:
       - name: 🍪 Setup cookies
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
-        run: echo "$YOUTUBE_COOKIES" > cookies.txt
+        run: |
+          if [ -z "$YOUTUBE_COOKIES" ]; then
+            rm -f cookies.txt
+            echo "No YOUTUBE_COOKIES secret; downloading without authentication"
+          else
+            printf '%s' "$YOUTUBE_COOKIES" > cookies.txt
+            python scripts/validate_youtube_cookies.py cookies.txt
+            chmod 600 cookies.txt
+          fi
       
       - name: 🎵 Download audio
         run: |
-          python scripts/download_batch.py \
+          CMD=(python scripts/download_batch.py \
             --manifest output/list.json \
             --limit ${{ github.event.inputs.video_limit }} \
-            --cookies cookies.txt \
-            --out output/audio
+            --out output/audio)
+          if [ -s cookies.txt ]; then
+            CMD+=(--cookies cookies.txt)
+          fi
+          "${CMD[@]}"
       
       - name: 📤 Upload audio
         uses: actions/upload-artifact@v4

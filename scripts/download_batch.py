@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description="Batch download audio files")
     parser.add_argument("--manifest", required=True, help="Video list JSON from fetch-list")
     parser.add_argument("--limit", type=int, default=0, help="Max videos to download (0=all)")
-    parser.add_argument("--cookies", required=True, help="Path to cookies.txt")
+    parser.add_argument("--cookies", default=None, help="Optional path to a Netscape cookies file")
     parser.add_argument("--out", default="output/audio", help="Output directory")
     parser.add_argument("--format", default="m4a", choices=["mp3", "m4a", "wav"], help="Audio format")
     args = parser.parse_args()
