@@ -486,8 +486,8 @@ jobs:
           - Audio Files
           - Transcripts
           - Chapters
-          ${skip_translation == 'false' && '- Translations' || ''}
-          ${censor_mode != 'none' && '- Censored Audio' || ''}
+          - Translations are included when enabled in the workflow inputs.
+          - Censored audio is included when enabled in the workflow inputs.
           
           ## 🔗 Download Results
           Check the "Artifacts" section above to download processed files.
