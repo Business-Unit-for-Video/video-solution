@@ -121,7 +121,7 @@ jobs:
         id: fetch
         run: |
           CMD=(python -m src.video_solution.cli fetch-list \
-            --channel-url "${{ github.event.inputs.channel_url }}" \
+            --channel-url "${{ inputs.channel_url || vars.VIDEO_SOLUTION_CHANNEL_URL }}" \
             --out output/list.json \
             --format json)
           if [ -s cookies.txt ]; then
